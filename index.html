@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>中国象棋复盘</title>
+  <base href="./" />
+  <link rel="stylesheet" href="css/style.css" />
+  <link rel="icon" href="assets/pieces/red-shuai.png" />
+</head>
+<body>
+  <div class="app">
+    <header class="app-header">
+      <h1 class="title-seal">象 弈 复 盘</h1>
+      <p class="subtitle">Chinese Chess Replay · 纯前端 · 可部署 GitHub Pages</p>
+    </header>
+
+    <main class="stage">
+      <canvas id="board" width="800" height="900" aria-label="中国象棋棋盘"></canvas>
+
+      <!-- 隐藏的文件输入：PGN 上传 -->
+      <input id="pgn-upload" type="file" accept=".pgn,text/plain" hidden />
+      <input id="pgn-saveas" type="file" nwsaveas hidden /><!-- 备用占位 -->
+    </main>
+
+    <footer class="app-footer">
+      <div class="keys">
+        <span><kbd>R</kbd>重开</span>
+        <span><kbd>S</kbd>布置</span>
+        <span><kbd>←</kbd><kbd>→</kbd>复盘</span>
+        <span><kbd>Tab</kbd>分支</span>
+        <span><kbd>P</kbd>棋谱</span>
+        <span><kbd>L</kbd>棋谱库</span>
+        <span><kbd>Ctrl</kbd>+<kbd>S</kbd>导出PGN</span>
+      </div>
+      <div class="credit">纯原生 HTML · CSS · JavaScript ｜ 规则源自 Godot 项目 XiangqiGame 965 行</div>
+    </footer>
+  </div>
+
+  <script type="module" src="js/xiangqi-board.js"></script>
+</body>
+</html>
