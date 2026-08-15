@@ -81,18 +81,61 @@ pikafish.nnue (53MB NNUE 权重文件)
 
 如果 `engine_server.py` 提示「未找到 pikafish.exe」，按以下步骤操作：
 
+> **重要**：皮卡鱼是 **CPU 引擎**（NNUE 跑在 CPU 上），跟**显卡（GPU）无关**。选版本看的是 **CPU 指令集**，不是显卡型号。下面教你如何对号入座。
+
 **第一步：下载**
 
-打开 [Pikafish Releases](https://github.com/official-pikafish/Pikafish/releases/latest)，根据 CPU 选一个压缩包：
+打开 [Pikafish Releases](https://github.com/official-pikafish/Pikafish/releases/latest)，根据 **CPU 指令集** 选一个压缩包（从上到下，越靠上性能越高，但不支持就启动直接崩溃）：
 
-| 文件名 | 适用 CPU |
+| 文件名 | 指令集 | Intel CPU | AMD CPU |
+|---|---|---|---|
+| `pikafish-windows-x86-64-vnni512.zip` | AVX-512 VNNI | Ice Lake (10代) / Xeon Cascade Lake 及以上 | Zen 4 (Ryzen 7000) 及以上 |
+| `pikafish-windows-x86-64-avx512.zip` | AVX-512 F/CD/BW/VL | Skylake-X (HEDT) 及以上 | Zen 4 (Ryzen 7000) 及以上 |
+| `pikafish-windows-x86-64-avxvnni.zip` | AVX-VNNI | **Tiger Lake (11代) 及以上** ⭐ 12/13/14 代必选 | Zen 3 (Ryzen 5000) 及以上 |
+| `pikafish-windows-x86-64-bmi2.zip` | BMI2 | Haswell (4代) 及以上 | Zen 3 (Ryzen 5000) 及以上 |
+| `pikafish-windows-x86-64-avx2.zip` | AVX2 | Haswell (4代, 2013) 及以上 | Zen 1 (Ryzen 1000) 及以上 |
+| `pikafish-windows-x86-64-sse41-popcnt.zip` | SSE4.1 + POPCNT | Core 2 Duo (2008) 之后基本都有 | Bulldozer 及以上 |
+
+> **常见误区**：12 代 (Alder Lake) 及以上的 Intel **客户端** CPU **不支持 AVX-512 / VNNI512**（大小核架构砍掉了），请选 **avxvnni** 版本。例如 i5-13500HX、i7-12700H、i9-14900K 都属于这类。
+
+### 如何查看自己的 CPU 支持哪种指令集
+
+**方法一：一行命令（推荐）**
+
+打开 PowerShell，执行：
+
+```powershell
+Get-CimInstance Win32_Processor | Select-Object Name
+```
+
+看输出的 CPU 型号，对照上表选版本。例如：
+
+```
+Name
+----
+13th Gen Intel(R) Core(TM) i5-13500HX
+```
+
+→ 13 代 Intel 客户端 CPU，查表 → 选 **`avxvnni`**。
+
+**方法二：CPU-Z / HWiNFO**
+
+下载 [CPU-Z](https://www.cpuid.com/softwares/cpu-z.html) 或 [HWiNFO](https://www.hwinfo.com/)，打开后看 **Instructions** 一栏，会列出 `AVX2`、`AVX-512`、`AVX-VNNI`、`BMI2` 等具体支持的指令集。
+
+**方法三：照型号推算**
+
+| 你的 CPU | 推荐版本 |
 |---|---|
-| `pikafish-windows-x86-64-vnni512.zip` | Intel Ice Lake+ / AMD Zen 4+ |
-| `pikafish-windows-x86-64-avx512.zip` | Intel Skylake-X+ / AMD Zen 4+ |
-| `pikafish-windows-x86-64-avxvnni.zip` | Intel Tiger Lake+ / AMD Zen 3+ |
-| `pikafish-windows-x86-64-bmi2.zip` | Intel Haswell+ / AMD Zen 3+（不确定就选这个） |
-| `pikafish-windows-x86-64-avx2.zip` | 大多数 2013 年后的 CPU |
-| `pikafish-windows-x86-64-sse41-popcnt.zip` | 老电脑兜底 |
+| Intel 12/13/14 代酷睿（型号含 `12xx`/`13xx`/`14xx`）| `avxvnni` |
+| Intel 11 代酷睿（型号含 `11xx`）| `avxvnni` |
+| Intel 10 代及以下酷睿 | `avx2` 或 `bmi2` |
+| Intel Xeon (服务器，2019+) | `vnni512` 或 `avx512` |
+| AMD Ryzen 7000+ / 9000+ | `vnni512` 或 `avx512` |
+| AMD Ryzen 5000 | `avxvnni` 或 `bmi2` |
+| AMD Ryzen 3000 及以下 | `avx2` |
+| 不确定 / 十年前的老电脑 | `sse41-popcnt` 兜底 |
+
+> **试错法**：下载错了也没关系，选错了引擎一启动就崩溃退出（无报错弹窗，只是 `engine_server.py` 显示「引擎启动失败」），换一个版本即可。
 
 **第二步：解压到 `nnue/` 文件夹**
 
