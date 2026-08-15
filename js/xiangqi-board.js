@@ -1171,14 +1171,6 @@ function handleLibClick(px, py) {
 				requestRender();
 				return;
 			}
-			if (pointInRect(px, py, rb.del)) {
-				StorageManager.library.deleteGame(rb.entry.id);
-				libList = StorageManager.library.listGames();
-				drawLibPanel._rowButtons = [];
-				setHint('已删除');
-				requestRender();
-				return;
-			}
 		}
 	}
 }
@@ -1272,6 +1264,7 @@ function onKeyDown(e) {
 		case 's':
 		case 'S':
 			if (mode !== 'setup') {
+				// 进入布置模式：彻底清理棋盘并重开一个布置起点，解绑当前棋谱
 				mode = 'setup';
 				selected = null;
 				legalTargets = [];
@@ -1286,7 +1279,19 @@ function onKeyDown(e) {
 				game.winner = null;
 				currentLibraryId = null;
 				currentLibraryFilename = null;
-				setHint('布置模式：palette选子，点格放置，点棋子移除');
+				setHint('布置模式：palette选子，点格放置，点棋子移除；按 S 返回对局模式');
+			} else {
+				// 从布置模式切回对局模式：把当前摆好的棋盘当作初始局面，并应用 setupRedFirst 决定先手
+				game.root_node = new MoveNode();
+				game.root_node.initial_board = game._clone_board(game.board);
+				game.current_node = game.root_node;
+				game.current_turn = setupRedFirst ? 'red' : 'black';
+				gameOverMsg = '';
+				game.winner = null;
+				mode = 'play';
+				selected = null;
+				legalTargets = [];
+				setHint(`布置完成，${game.current_turn === 'red' ? '红' : '黑'}方先行；当前为新对局`);
 			}
 			requestRender();
 			break;
@@ -1378,12 +1383,27 @@ function saveCurrentGameToLibrary() {
 
 function exportPGN() {
 	try {
+		const countBefore = libList.length;
+		const countBeforeLibView = StorageManager.library.listGames().length;
 		const pgn = game.export_pgn();
-		const filename = currentLibraryFilename || _buildSaveFilename();
+		const libFilenameBefore = currentLibraryFilename;
+		const idBefore = currentLibraryId;
+		const filename = libFilenameBefore || _buildSaveFilename();
 		StorageManager.fileIO.exportAsDownload(pgn, filename);
 		const saved = saveCurrentGameToLibrary();
-		const tag = StorageManager.library.hasGame(saved.id) && StorageManager.library.listGames().some(g => g.id === saved.id) ? '更新' : '保存';
-		setHint(`已${tag}并导出 ${saved.filename}`);
+		const list = StorageManager.library.listGames();
+		const countAfter = list.length;
+		const created = (idBefore == null) && countAfter > countBeforeLibView;
+		const updated = idBefore != null && countAfter === Math.max(countBeforeLibView, 1);
+		const tag = created ? '新增' : updated ? '更新' : '已';
+		const fnView = saved.filename || filename;
+		const idView = saved.id ? saved.id.slice(0, 8) : '';
+		let extra = '';
+		if (countAfter === 1) extra = '（棋谱库当前共 1 条，未新建副本）';
+		else if (countAfter === countBeforeLibView) extra = `（棋谱库共 ${countAfter} 条，数量与保存前一致）`;
+		else extra = `（棋谱库 ${countBeforeLibView||0} → ${countAfter} 条）`;
+		const dlHint = '已下载 PGN 到浏览器默认下载目录；若同名多次下载，Chrome/Edge 会自动加 (1)(2) 后缀，这是浏览器行为，棋谱库内部仅保留最新版本。';
+		setHint(`${tag} 棋谱：${fnView} [id:${idView}] ${extra} · ${dlHint}`, 20);
 	} catch (err) {
 		setError('导出失败: ' + (err.message || err));
 	}
@@ -1442,5 +1462,59 @@ document.addEventListener('DOMContentLoaded', () => {
 	canvas.addEventListener('click', onMouseClick);
 	canvas.addEventListener('wheel', onMouseWheel, { passive: false });
 	window.addEventListener('keydown', onKeyDown);
+	// 暴露关键状态给浏览器调试/测试：刷新 __xq 快照
+	const snap = () => ({
+		currentLibraryId,
+		currentLibraryFilename,
+		mode,
+		current_turn: game.current_turn,
+		winner: game.winner,
+		currentIsRoot: game.current_node && game.current_node.isRoot(),
+		pieceCount: (() => { let n = 0; for (let y=0;y<10;y++) for (let x=0;x<9;x++) if (game.board[y][x]) n++; return n; })(),
+		libCount: libList.length,
+		panelOpen, libOpen, gameOverMsg,
+	});
+	window.__xq = {
+		get state() { return snap(); },
+		_storage: StorageManager,
+		_game: game,
+		_saveCurrent: saveCurrentGameToLibrary,
+		_export: exportPGN,
+		_auto: autoSavePGN,
+		_setModePlay: () => { mode = 'play'; },
+		_keys: { onKeyDown, onMouseClick, requestRender },
+		// 测试辅助：直接调用「载入棋谱库条目」按钮的效果（从库 ID 载入并回填 currentLibraryId）
+		_loadFromLibrary(entryOrId) {
+			const id = typeof entryOrId === 'string' ? entryOrId : entryOrId && entryOrId.id;
+			if (!id) return { ok: false, reason: 'no-id' };
+			const pgn = StorageManager.library.loadGame(id);
+			if (!pgn) return { ok: false, reason: 'pgn-not-found' };
+			const metaKey = StorageManager.library.KEY_PREFIX + id + '::meta';
+			let filename = null;
+			try {
+				const m = localStorage.getItem(metaKey);
+				if (m) filename = (JSON.parse(m) || {}).filename || null;
+			} catch (e) { /* ignore */ }
+			const ok = game.import_pgn(pgn);
+			if (!ok) return { ok: false, reason: 'import-failed' };
+			mode = 'play';
+			panelOpen = false;
+			libOpen = false;
+			selected = null;
+			legalTargets = [];
+			gameOverMsg = '';
+			lastMove = !game.current_node.isRoot() ? { from: game.current_node.from, to: game.current_node.to } : null;
+			currentLibraryId = id;
+			currentLibraryFilename = filename;
+			game._emit_position_changed();
+			requestRender();
+			return { ok: true, id, filename };
+		},
+		// 测试辅助：强制清空 currentLibrary 绑定（模拟新局）
+		_unbindLibrary() {
+			currentLibraryId = null;
+			currentLibraryFilename = null;
+		},
+	};
 	requestRender();
 });
