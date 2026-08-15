@@ -31,7 +31,8 @@
 html, body {
   margin: 0;
   padding: 0;
-  min-height: 100vh;
+  height: 100vh;
+  overflow: hidden;
   font-family: var(--font-body);
   color: var(--paper);
   background:
@@ -45,7 +46,6 @@ html, body {
       var(--bg-1) 4px
     ),
     linear-gradient(180deg, var(--bg-0), var(--bg-2));
-  overflow-x: hidden;
 }
 
 /* ------- 纸卷 grain 纹理（纯 CSS 噪点） ------- */
@@ -61,27 +61,28 @@ body::before {
 }
 
 /* =========================================================
-   APP 布局：竖向居中 800×900 画布
+   APP 布局：100vh 禁止滚动，Canvas 自适应缩放
    ========================================================= */
 .app {
-  min-height: 100vh;
+  height: 100vh;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: flex-start;
-  padding: 28px 16px 40px;
-  gap: 18px;
+  justify-content: center;
+  padding: 6px 10px;
+  gap: 6px;
 }
 
 /* ------- 标题：印章风格 ------- */
-.app-header { text-align: center; }
+.app-header { text-align: center; flex-shrink: 0; }
 
 .title-seal {
   font-family: var(--font-title);
-  font-size: 44px;
-  letter-spacing: 12px;
-  margin: 0 0 6px;
-  padding-left: 12px; /* 补偿字间距视觉 */
+  font-size: 30px;
+  letter-spacing: 8px;
+  margin: 0;
+  padding-left: 8px;
   background: linear-gradient(180deg,
     var(--gold) 0%,
     #e8c678 45%,
@@ -98,43 +99,40 @@ body::before {
   content: "";
   position: absolute;
   top: 50%;
-  width: 46px;
+  width: 36px;
   height: 2px;
   background: linear-gradient(90deg, transparent, var(--gold-soft), transparent);
   transform: translateY(-50%);
 }
-.title-seal::before { right: calc(100% + 18px); }
-.title-seal::after  { left:  calc(100% + 18px); }
-
-.subtitle {
-  margin: 0;
-  font-size: 13px;
-  letter-spacing: 4px;
-  color: var(--gold-soft);
-  opacity: 0.75;
-  padding-left: 4px;
-}
+.title-seal::before { right: calc(100% + 12px); }
+.title-seal::after  { left:  calc(100% + 12px); }
 
 /* ------- 画纸舞台：仿古籍卷轴外框 ------- */
 .stage {
   position: relative;
-  padding: 22px;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 14px;
   border-radius: 6px;
   background:
     linear-gradient(135deg, rgba(139,90,43,0.25), rgba(92,58,29,0.1));
   box-shadow:
     0 0 0 1px rgba(212,168,90,0.25),
-    0 0 0 10px var(--bg-1),
-    0 0 0 11px rgba(212,168,90,0.2),
-    0 30px 80px -20px rgba(0,0,0,0.7),
-    inset 0 0 80px rgba(0,0,0,0.4);
+    0 0 0 8px var(--bg-1),
+    0 0 0 9px rgba(212,168,90,0.2),
+    0 20px 60px -20px rgba(0,0,0,0.7),
+    inset 0 0 60px rgba(0,0,0,0.4);
+  overflow: hidden;
 }
 .stage::before,
 .stage::after {
   content: "";
   position: absolute;
   left: 6px; right: 6px;
-  height: 10px;
+  height: 8px;
   background:
     repeating-linear-gradient(
       90deg,
@@ -144,16 +142,23 @@ body::before {
     );
   border-radius: 2px;
   opacity: 0.8;
+  z-index: 0;
 }
-.stage::before { top: 4px; }
-.stage::after  { bottom: 4px; }
+.stage::before { top: 3px; }
+.stage::after  { bottom: 3px; }
 
 #board {
   display: block;
   cursor: pointer;
   border-radius: 2px;
-  image-rendering: -webkit-optimize-contrast;
-  image-rendering: crisp-edges;
+  max-width: 100%;
+  max-height: 100%;
+  width: auto;
+  height: auto;
+  aspect-ratio: 800 / 900;
+  object-fit: contain;
+  position: relative;
+  z-index: 1;
   box-shadow:
     inset 0 0 60px rgba(0,0,0,0.15),
     0 2px 0 rgba(0,0,0,0.3);
@@ -162,27 +167,24 @@ body::before {
 /* ------- 快捷键栏 ------- */
 .app-footer {
   width: 100%;
-  max-width: 860px;
   display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 10px;
-  margin-top: 6px;
+  justify-content: center;
+  flex-shrink: 0;
 }
 
 .keys {
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
-  gap: 8px 14px;
-  font-size: 13px;
+  gap: 4px 10px;
+  font-size: 12px;
   color: var(--gold-soft);
 }
 .keys > span {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 4px 10px;
+  gap: 3px;
+  padding: 3px 8px;
   background: rgba(92,58,29,0.35);
   border: 1px solid rgba(212,168,90,0.18);
   border-radius: 4px;
@@ -191,10 +193,10 @@ body::before {
 
 kbd {
   display: inline-block;
-  min-width: 20px;
-  padding: 2px 6px;
+  min-width: 18px;
+  padding: 1px 5px;
   font-family: inherit;
-  font-size: 11px;
+  font-size: 10px;
   line-height: 1;
   color: var(--paper);
   background: linear-gradient(180deg, #4a3119, #2a1b0c);
@@ -203,27 +205,4 @@ kbd {
   border-radius: 3px;
   text-align: center;
   box-shadow: 0 1px 0 rgba(0,0,0,0.4);
-}
-
-.credit {
-  font-size: 11px;
-  letter-spacing: 1px;
-  color: rgba(183, 144, 80, 0.5);
-  padding-top: 4px;
-}
-
-/* =========================================================
-   响应式：窄屏左右加滚动条但不缩放 Canvas
-   ========================================================= */
-@media (max-width: 880px) {
-  .stage {
-    padding: 12px;
-    overflow-x: auto;
-    max-width: 100%;
-  }
-  #board {
-    min-width: 800px;
-  }
-  .title-seal { font-size: 32px; letter-spacing: 8px; }
-  .title-seal::before, .title-seal::after { display: none; }
 }
