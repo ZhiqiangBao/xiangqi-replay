@@ -1,5 +1,6 @@
 import { XiangqiGame, Piece, MoveNode } from './xiangqi-game.js';
 import StorageManager from './storage.js';
+import FileHandleStore from './file-handle-store.js';
 
 const CANVAS_W = 800;
 const CANVAS_H = 900;
@@ -73,6 +74,9 @@ let hintTime = 0;
 let gameOverMsg = '';
 let currentLibraryId = null;       // 当前对局关联的棋谱库条目ID（有值时保存走更新，不新建）
 let currentLibraryFilename = null; // 对应库条目的文件名（可选记录，便于更新展示）
+// 磁盘文件绑定：当前 currentLibraryId 对应的 FileSystemFileHandle 内存态。
+// 「同一盘棋对应同一个磁盘 .pgn 文件，更新时覆盖同文件不再下载副本」的核心锚点。
+let currentBoundFile = null;       // { libraryId, handle, pathHint, updatedAt } | null
 
 function cell2px(x, y) {
 	return { x: BOARD_OFFSET.x + x * CELL, y: BOARD_OFFSET.y + y * CELL };
@@ -1114,6 +1118,7 @@ function handleLibClick(px, py) {
 		lastMove = null;
 		currentLibraryId = null;
 		currentLibraryFilename = null;
+		currentBoundFile = null;
 		libList = StorageManager.library.listGames();
 		requestRender();
 		return;
@@ -1135,7 +1140,9 @@ function handleLibClick(px, py) {
 					if (currentLibraryId === rb.entry.id) {
 						currentLibraryId = null;
 						currentLibraryFilename = null;
+						currentBoundFile = null;
 					}
+					FileHandleStore.delete(rb.entry.id).catch(() => {});
 					libList = StorageManager.library.listGames();
 					setHint(`已删除 ${rb.entry.filename || rb.entry.id}`);
 				} catch (e) {
@@ -1159,6 +1166,20 @@ function handleLibClick(px, py) {
 							lastMove = !game.current_node.isRoot() ? { from: game.current_node.from, to: game.current_node.to } : null;
 							currentLibraryId = rb.entry.id;
 							currentLibraryFilename = rb.entry.filename || null;
+							// 载入棋谱时同步恢复该ID绑定的磁盘文件（若存在），这样后续保存直接覆盖同文件。
+							currentBoundFile = null;
+							FileHandleStore.get(rb.entry.id).then(rec => {
+								if (rec && rec.libraryId === rb.entry.id) {
+									currentBoundFile = {
+										libraryId: rec.libraryId,
+										handle: rec.handle || null,
+										pathHint: rec.pathHint || null,
+										updatedAt: rec.updatedAt || 0,
+									};
+									const msg = rec.pathHint ? `，已连接磁盘文件 ${rec.pathHint}` : '';
+									setHint(`已加载 ${rb.entry.filename || rb.entry.id}${msg}`);
+								}
+							}).catch(() => { /* ignore */ });
 							setHint(`已加载 ${rb.entry.filename || rb.entry.id}`);
 							game._emit_position_changed();
 						} else {
@@ -1258,6 +1279,7 @@ function onKeyDown(e) {
 			panelRowsCache = [];
 			currentLibraryId = null;
 			currentLibraryFilename = null;
+			currentBoundFile = null;
 			setHint('已重新开局，红方先行');
 			requestRender();
 			break;
@@ -1279,6 +1301,7 @@ function onKeyDown(e) {
 				game.winner = null;
 				currentLibraryId = null;
 				currentLibraryFilename = null;
+				currentBoundFile = null;
 				setHint('布置模式：palette选子，点格放置，点棋子移除；按 S 返回对局模式');
 			} else {
 				// 从布置模式切回对局模式：把当前摆好的棋盘当作初始局面，并应用 setupRedFirst 决定先手
@@ -1291,6 +1314,7 @@ function onKeyDown(e) {
 				mode = 'play';
 				selected = null;
 				legalTargets = [];
+				currentBoundFile = null;
 				setHint(`布置完成，${game.current_turn === 'red' ? '红' : '黑'}方先行；当前为新对局`);
 			}
 			requestRender();
@@ -1369,7 +1393,21 @@ function saveCurrentGameToLibrary() {
 	if (currentLibraryId) {
 		const res = StorageManager.library.updateGame(currentLibraryId, pgn, undefined);
 		filename = res.filename;
-		if (res.id_renewed) currentLibraryId = res.id;
+		if (res.id_renewed) {
+			// localStorage 里原 ID 不存在被回退重建：也要把磁盘绑定从旧 ID 迁到新 ID（迁不走就解绑定）
+			const oldId = currentLibraryId;
+			currentLibraryId = res.id;
+			if (currentBoundFile && currentBoundFile.libraryId === oldId) {
+				currentBoundFile.libraryId = res.id;
+				FileHandleStore.put(res.id, {
+					handle: currentBoundFile.handle,
+					pathHint: currentBoundFile.pathHint,
+				}).catch(() => {});
+				FileHandleStore.delete(oldId).catch(() => {});
+			} else {
+				currentBoundFile = null;
+			}
+		}
 		currentLibraryFilename = filename || currentLibraryFilename;
 	} else {
 		filename = _buildSaveFilename();
@@ -1378,42 +1416,159 @@ function saveCurrentGameToLibrary() {
 		currentLibraryFilename = res.filename || filename;
 	}
 	libList = StorageManager.library.listGames();
-	return { filename, id: currentLibraryId };
+	return { filename, id: currentLibraryId, pgn };
 }
 
-function exportPGN() {
+// 核心：把当前 PGN 写到与 currentLibraryId 绑定的磁盘文件里。
+// 逻辑：
+//   1) 已有绑定 handle → 直接覆盖写入（无下载，无副本）。
+//   2) 无绑定但浏览器支持 File System Access API + 允许用户手势（用户主动 Ctrl+S）
+//      → 调用 showSaveFilePicker 让用户选路径；选定后立即写入 + 建立 libraryId ↔ handle 持久绑定。
+//   3) 不支持 / 用户取消 / 自动保存（无用户手势无法弹出 picker）
+//      → diskWrite 失败，返回 { disk: 'skipped' }；此时库 localStorage 已经通过 saveCurrentGameToLibrary 成功保存。
+async function saveCurrentBoundFile({ allowPickNew = false } = {}) {
+	const pgn = game.export_pgn();
+	if (!currentLibraryId) {
+		// 这种情况先保存到库拿到 ID，再可能绑定磁盘文件
+		saveCurrentGameToLibrary();
+	}
+	const libraryId = currentLibraryId;
+	if (!libraryId) return { disk: 'skipped', reason: 'no-library-id' };
+
+	// 情况 1：内存里已有绑定 → 直接覆盖磁盘同文件
+	const handleFromMemory = (currentBoundFile && currentBoundFile.libraryId === libraryId && currentBoundFile.handle) ? currentBoundFile.handle : null;
+	if (handleFromMemory) {
+		const r = await FileHandleStore.writePGNToBoundHandle(handleFromMemory, pgn);
+		if (r.ok) {
+			currentBoundFile = {
+				libraryId,
+				handle: handleFromMemory,
+				pathHint: r.pathHint || (currentBoundFile ? currentBoundFile.pathHint : null),
+				updatedAt: Date.now(),
+			};
+			FileHandleStore.put(libraryId, {
+				handle: handleFromMemory,
+				pathHint: currentBoundFile.pathHint,
+			}).catch(() => {});
+			return { disk: 'updated-overwrite', pathHint: r.pathHint, size: r.size };
+		}
+		// 覆盖失败（权限过期、句柄失效、文件删除过） → 标记内存态失效，等用户重新选路径
+		currentBoundFile = null;
+		FileHandleStore.delete(libraryId).catch(() => {});
+		// 让后续流程按「API 不支持 / 无绑定」回退
+	}
+
+	// 情况 2：无绑定 → 尝试从 IDB 恢复持久绑定（比如载入棋谱时 FileHandleStore.get 还没回来）
+	if (!currentBoundFile || !currentBoundFile.handle) {
+		try {
+			const rec = await FileHandleStore.get(libraryId);
+			if (rec && rec.handle) {
+				const r = await FileHandleStore.writePGNToBoundHandle(rec.handle, pgn);
+				if (r.ok) {
+					currentBoundFile = {
+						libraryId,
+						handle: rec.handle,
+						pathHint: r.pathHint || rec.pathHint || null,
+						updatedAt: Date.now(),
+					};
+					return { disk: 'updated-after-restore', pathHint: r.pathHint, size: r.size };
+				} else {
+					// 句柄失效，从 IDB 清掉
+					FileHandleStore.delete(libraryId).catch(() => {});
+				}
+			}
+		} catch (e) { /* ignore */ }
+	}
+
+	// 情况 3：仍然无有效句柄 → 允许用户手势 pick 新文件路径（Ctrl+S）
+	if (allowPickNew && FileHandleStore.SUPPORTS_NATIVE_FILE_SYSTEM) {
+		const suggested = currentLibraryFilename || _buildSaveFilename();
+		const pick = await FileHandleStore.pickPGNSaveFile(suggested);
+		if (pick.ok && pick.handle) {
+			// 写入新路径
+			const w = await FileHandleStore.writePGNToBoundHandle(pick.handle, pgn);
+			if (w.ok) {
+				currentBoundFile = {
+					libraryId,
+					handle: pick.handle,
+					pathHint: w.pathHint || pick.pathHint || null,
+					updatedAt: Date.now(),
+				};
+				currentLibraryFilename = currentLibraryFilename || (currentBoundFile.pathHint || suggested);
+				try {
+					await FileHandleStore.put(libraryId, {
+						handle: pick.handle,
+						pathHint: currentBoundFile.pathHint,
+					});
+				} catch (e) { /* ignore */ }
+				return { disk: 'new-bound-picked', pathHint: currentBoundFile.pathHint, size: w.size };
+			} else {
+				return { disk: 'skipped', reason: 'write-after-pick-failed', message: w.message };
+			}
+		} else if (pick.reason === 'user-canceled') {
+			return { disk: 'skipped', reason: 'user-canceled-pick' };
+		} else if (pick.reason === 'unsupported') {
+			// 继续走下面回退
+		} else {
+			return { disk: 'skipped', reason: pick.reason || 'picker-failed', message: pick.message };
+		}
+	}
+
+	// 情况 4：所有路径都不行 → 磁盘层放弃，localStorage 层已成功保存
+	return { disk: 'skipped', reason: FileHandleStore.SUPPORTS_NATIVE_FILE_SYSTEM ? 'no-bound-no-pick' : 'unsupported-platform' };
+}
+
+async function exportPGN() {
 	try {
-		const countBefore = libList.length;
 		const countBeforeLibView = StorageManager.library.listGames().length;
-		const pgn = game.export_pgn();
-		const libFilenameBefore = currentLibraryFilename;
 		const idBefore = currentLibraryId;
-		const filename = libFilenameBefore || _buildSaveFilename();
-		StorageManager.fileIO.exportAsDownload(pgn, filename);
+		const pgn = game.export_pgn();
+		// 1) localStorage 棋谱库保存（更新 / 新建一条，确保有 libraryId 唯一序列号）
 		const saved = saveCurrentGameToLibrary();
 		const list = StorageManager.library.listGames();
 		const countAfter = list.length;
 		const created = (idBefore == null) && countAfter > countBeforeLibView;
 		const updated = idBefore != null && countAfter === Math.max(countBeforeLibView, 1);
-		const tag = created ? '新增' : updated ? '更新' : '已';
-		const fnView = saved.filename || filename;
-		const idView = saved.id ? saved.id.slice(0, 8) : '';
-		let extra = '';
-		if (countAfter === 1) extra = '（棋谱库当前共 1 条，未新建副本）';
-		else if (countAfter === countBeforeLibView) extra = `（棋谱库共 ${countAfter} 条，数量与保存前一致）`;
-		else extra = `（棋谱库 ${countBeforeLibView||0} → ${countAfter} 条）`;
-		const dlHint = '已下载 PGN 到浏览器默认下载目录；若同名多次下载，Chrome/Edge 会自动加 (1)(2) 后缀，这是浏览器行为，棋谱库内部仅保留最新版本。';
-		setHint(`${tag} 棋谱：${fnView} [id:${idView}] ${extra} · ${dlHint}`, 20);
+		const libTag = created ? '新增' : updated ? '更新' : '已';
+		const libIdView = saved.id ? saved.id.slice(0, 8) : '';
+
+		// 2) 磁盘文件层：优先「同一 libraryId 覆盖用户最初选定的那一个 .pgn 文件」，避免浏览器下载 (1)(2) 副本
+		const diskRes = await saveCurrentBoundFile({ allowPickNew: true });
+		let hint;
+		if (diskRes.disk && diskRes.disk.startsWith('updated')) {
+			const where = diskRes.pathHint ? `「${diskRes.pathHint}」` : '绑定的磁盘文件';
+			const extra = countAfter === countBeforeLibView ? `（棋谱库 ${countAfter} 条，同条目内同步更新）` : '';
+			hint = `✅ 已覆盖同一份棋谱文件 ${where}，不会在下载区生成新副本。棋谱库 ${libTag} ID=${libIdView} ${extra}`;
+		} else if (diskRes.disk === 'new-bound-picked') {
+			const where = diskRes.pathHint ? `「${diskRes.pathHint}」` : '选定的磁盘文件';
+			hint = `✅ 已建立磁盘绑定：本局序列 ID=${libIdView} ↔ ${where}。后续 Ctrl+S / 自动结束保存将直接覆盖这同一个文件，不再生成副本。`;
+		} else {
+			// 无法 File System Access：回退到传统 a[download] 下载
+			const filename = currentLibraryFilename || _buildSaveFilename();
+			StorageManager.fileIO.exportAsDownload(pgn, filename);
+			const dlExplain = '当前浏览器不支持直接覆盖磁盘文件（Firefox/Safari）。若使用 Chrome/Edge 86+，会弹出另存为让你选择一个位置，之后会一直覆盖该文件不再生成副本。';
+			const extra = countAfter === countBeforeLibView ? `棋谱库仍为 ${countAfter} 条，未新建条目。` : '';
+			hint = `${libTag} 棋谱：${saved.filename} [库 ID:${libIdView}] ${extra} · ${dlExplain}`;
+		}
+		setHint(hint);
 	} catch (err) {
 		setError('导出失败: ' + (err.message || err));
 	}
 }
 
 function autoSavePGN() {
-	try {
-		saveCurrentGameToLibrary();
-	} catch (e) {
-	}
+	// autoSavePGN 没有用户手势，showSaveFilePicker 会被浏览器拒绝。
+	// 所以：先入库 localStorage（保证 100% 存到库）；如果已有绑定磁盘 handle，顺手覆盖写磁盘文件。
+	(async () => {
+		try {
+			saveCurrentGameToLibrary();
+			if (currentLibraryId && currentBoundFile && currentBoundFile.handle) {
+				await saveCurrentBoundFile({ allowPickNew: false });
+			}
+		} catch (e) {
+			// 自动吞错误，避免页面被异常中断
+		}
+	})();
 }
 
 function setupUploadInput() {
@@ -1434,6 +1589,7 @@ function setupUploadInput() {
 				lastMove = !game.current_node.isRoot() ? { from: game.current_node.from, to: game.current_node.to } : null;
 				currentLibraryId = null;
 				currentLibraryFilename = null;
+				currentBoundFile = null;
 				setHint(`已导入 ${file.name}`);
 				game._emit_position_changed();
 			} else {
@@ -1466,6 +1622,14 @@ document.addEventListener('DOMContentLoaded', () => {
 	const snap = () => ({
 		currentLibraryId,
 		currentLibraryFilename,
+		currentBoundFile: currentBoundFile
+			? {
+				libraryId: currentBoundFile.libraryId,
+				pathHint: currentBoundFile.pathHint,
+				updatedAt: currentBoundFile.updatedAt,
+				hasHandle: !!currentBoundFile.handle,
+			  }
+			: null,
 		mode,
 		current_turn: game.current_turn,
 		winner: game.winner,
@@ -1473,18 +1637,21 @@ document.addEventListener('DOMContentLoaded', () => {
 		pieceCount: (() => { let n = 0; for (let y=0;y<10;y++) for (let x=0;x<9;x++) if (game.board[y][x]) n++; return n; })(),
 		libCount: libList.length,
 		panelOpen, libOpen, gameOverMsg,
+		supportsFS: FileHandleStore.SUPPORTS_NATIVE_FILE_SYSTEM,
 	});
 	window.__xq = {
 		get state() { return snap(); },
 		_storage: StorageManager,
+		_handleStore: FileHandleStore,
 		_game: game,
 		_saveCurrent: saveCurrentGameToLibrary,
+		_saveBound: saveCurrentBoundFile,
 		_export: exportPGN,
 		_auto: autoSavePGN,
 		_setModePlay: () => { mode = 'play'; },
 		_keys: { onKeyDown, onMouseClick, requestRender },
-		// 测试辅助：直接调用「载入棋谱库条目」按钮的效果（从库 ID 载入并回填 currentLibraryId）
-		_loadFromLibrary(entryOrId) {
+		// 测试辅助：直接调用「载入棋谱库条目」按钮的效果（从库 ID 载入并回填 currentLibraryId + 恢复磁盘绑定）
+		async _loadFromLibrary(entryOrId) {
 			const id = typeof entryOrId === 'string' ? entryOrId : entryOrId && entryOrId.id;
 			if (!id) return { ok: false, reason: 'no-id' };
 			const pgn = StorageManager.library.loadGame(id);
@@ -1506,14 +1673,40 @@ document.addEventListener('DOMContentLoaded', () => {
 			lastMove = !game.current_node.isRoot() ? { from: game.current_node.from, to: game.current_node.to } : null;
 			currentLibraryId = id;
 			currentLibraryFilename = filename;
+			// 同步恢复磁盘绑定
+			currentBoundFile = null;
+			try {
+				const rec = await FileHandleStore.get(id);
+				if (rec && rec.libraryId === id) {
+					currentBoundFile = {
+						libraryId: rec.libraryId,
+						handle: rec.handle || null,
+						pathHint: rec.pathHint || null,
+						updatedAt: rec.updatedAt || 0,
+					};
+				}
+			} catch (e) { /* ignore */ }
 			game._emit_position_changed();
 			requestRender();
-			return { ok: true, id, filename };
+			return { ok: true, id, filename, bound: currentBoundFile ? { hasHandle: !!currentBoundFile.handle, pathHint: currentBoundFile.pathHint } : null };
 		},
 		// 测试辅助：强制清空 currentLibrary 绑定（模拟新局）
 		_unbindLibrary() {
 			currentLibraryId = null;
 			currentLibraryFilename = null;
+			currentBoundFile = null;
+		},
+		// 调试：直接手动 set 假的绑定句柄（用 File System Access API pick 一个文件），模拟「已经绑定磁盘文件」的场景
+		async _debugMockBindPick(suggestedName) {
+			if (!FileHandleStore.SUPPORTS_NATIVE_FILE_SYSTEM) return { ok: false, reason: 'unsupported' };
+			const pick = await FileHandleStore.pickPGNSaveFile(suggestedName || _buildSaveFilename());
+			if (!pick.ok || !pick.handle) return { ok: false, reason: pick.reason || 'picker-failed' };
+			saveCurrentGameToLibrary();
+			const id = currentLibraryId;
+			if (!id) return { ok: false, reason: 'no-id' };
+			currentBoundFile = { libraryId: id, handle: pick.handle, pathHint: pick.pathHint || null, updatedAt: Date.now() };
+			await FileHandleStore.put(id, { handle: pick.handle, pathHint: currentBoundFile.pathHint });
+			return { ok: true, id, pathHint: currentBoundFile.pathHint };
 		},
 	};
 	requestRender();
