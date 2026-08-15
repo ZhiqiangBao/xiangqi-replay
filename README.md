@@ -45,27 +45,17 @@
 
 ## 本地运行
 
-> 不能直接双击 `index.html` 打开！项目使用了 ES Modules（`<script type="module">`），`file://` 协议下浏览器会阻止模块加载。
+> 不能直接双击 `index.html` 打开！项目使用了 ES Modules，浏览器安全策略不允许 `file://` 协议加载。
 
-任选一种方式启动本地服务器：
+**最简单的方式 —— Python 一键启动**
 
-**方式一：npx（需要 Node.js）**
+项目根目录自带了 `server.py`，它会自动启动服务器并打开浏览器：
+
 ```bash
-cd xiangqi-replay
-npx serve .
+python server.py
 ```
 
-**方式二：Python 自带服务器**
-```bash
-cd xiangqi-replay
-python -m http.server 8000
-```
-
-**方式三：VS Code Live Server 插件**
-
-安装 Live Server 插件 → 右键 `index.html` → Open with Live Server
-
-启动后浏览器访问 `http://localhost:8000`（端口号取决于启动方式）即可。
+浏览器会自动弹出，不需要手动输地址。按 `Ctrl+C` 停止。
 
 > 当然，最简单的方式是直接用上面的在线版链接。
 
