@@ -1812,10 +1812,18 @@ document.addEventListener('DOMContentLoaded', () => {
 	canvas.addEventListener('click', onMouseClick);
 	canvas.addEventListener('wheel', onMouseWheel, { passive: false });
 	window.addEventListener('keydown', onKeyDown);
-	// 浏览器关闭/刷新时通知引擎服务退出
+	// 浏览器关闭/刷新时通知引擎服务退出（兜底，不一定可靠）
 	window.addEventListener('beforeunload', () => {
 		navigator.sendBeacon('/api/shutdown');
 	});
+	// 定期心跳：让 engine_server.py 知道前端还活着。
+	// 关闭浏览器时心跳停止，后端 _heartbeat_watcher 超时后自动退出，
+	// 不再依赖不可靠的 beforeunload + sendBeacon 组合。
+	setInterval(() => {
+		try {
+			fetch('/api/heartbeat', { method: 'POST', keepalive: true });
+		} catch (e) { /* 忽略：浏览器可能正在关闭 */ }
+	}, 5000);
 	// 暴露关键状态给浏览器调试/测试：刷新 __xq 快照
 	const snap = () => ({
 		currentLibraryId,

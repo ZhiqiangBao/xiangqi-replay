@@ -45,3 +45,7 @@ nnue/*
 !nnue/.gitkeep
 pikafish*.exe
 pikafish*.nnue
+
+# Python 缓存
+__pycache__/
+*.pyc
