@@ -81,22 +81,47 @@ pikafish.nnue (53MB NNUE 权重文件)
 
 如果 `engine_server.py` 提示「未找到 pikafish.exe」，按以下步骤操作：
 
-> **重要**：皮卡鱼是 **CPU 引擎**（NNUE 跑在 CPU 上），跟**显卡（GPU）无关**。选版本看的是 **CPU 指令集**，不是显卡型号。下面教你如何对号入座。
+> **重要**：皮卡鱼是 **CPU 引擎**（NNUE 跑在 CPU 上），跟**显卡（GPU）无关**。选版本看的是 **CPU 指令集**，不是显卡型号。
 
-**第一步：下载**
+**第一步：下载皮卡鱼完整包**
 
-打开 [Pikafish Releases](https://github.com/official-pikafish/Pikafish/releases/latest)，根据 **CPU 指令集** 选一个压缩包（从上到下，越靠上性能越高，但不支持就启动直接崩溃）：
+打开 [皮卡鱼官网](http://pikafish.com) 或 [GitHub Releases](https://github.com/official-pikafish/Pikafish/releases/latest)，下载一个完整压缩包。**一个压缩包里就包含了所有 CPU 指令集对应的引擎可执行文件**，不用按指令集分别下载。
+
+解压后 Windows 部分的目录结构如下：
+
+```
+皮卡鱼 20260131/
+├── pikafish-vnni512.exe        ← 性能从高到低
+├── pikafish-avx512icl.exe         （不支持就崩溃，往下选）
+├── pikafish-avx512.exe
+├── pikafish-avxvnni.exe        ⭐ 12/13/14 代 Intel 必选
+├── pikafish-bmi2.exe
+├── pikafish-avx2.exe
+├── pikafish-sse41-popcnt.exe   ← 老电脑兜底
+├── pikafish.nnue                ← NNUE 权重（所有 exe 共用，约 53MB）
+├── Linux/                       ← Linux 各指令集版本
+├── MacOS/
+├── Android/
+└── 更新日志.txt / 引擎介绍.txt 等
+```
+
+> **关键**：7 个 `pikafish-*.exe` **只能选一个**放进 `nnue/`，不能全塞进去。本项目的 `engine_server.py` 会按性能优先级自动选择，如果 `nnue/` 里同时有 `vnni512` 和 `avxvnni`，会优先选 `vnni512`，但你的 CPU 不支持就会启动崩溃。
+
+**第二步：根据 CPU 选一个 exe**
+
+按下表对应自己的 CPU 选一个（性能从高到低，不支持就往下选）：
 
 | 文件名 | 指令集 | Intel CPU | AMD CPU |
 |---|---|---|---|
-| `pikafish-windows-x86-64-vnni512.zip` | AVX-512 VNNI | Ice Lake (10代) / Xeon Cascade Lake 及以上 | Zen 4 (Ryzen 7000) 及以上 |
-| `pikafish-windows-x86-64-avx512.zip` | AVX-512 F/CD/BW/VL | Skylake-X (HEDT) 及以上 | Zen 4 (Ryzen 7000) 及以上 |
-| `pikafish-windows-x86-64-avxvnni.zip` | AVX-VNNI | **Tiger Lake (11代) 及以上** ⭐ 12/13/14 代必选 | Zen 3 (Ryzen 5000) 及以上 |
-| `pikafish-windows-x86-64-bmi2.zip` | BMI2 | Haswell (4代) 及以上 | Zen 3 (Ryzen 5000) 及以上 |
-| `pikafish-windows-x86-64-avx2.zip` | AVX2 | Haswell (4代, 2013) 及以上 | Zen 1 (Ryzen 1000) 及以上 |
-| `pikafish-windows-x86-64-sse41-popcnt.zip` | SSE4.1 + POPCNT | Core 2 Duo (2008) 之后基本都有 | Bulldozer 及以上 |
+| `pikafish-vnni512.exe` | AVX-512 VNNI | Ice Lake (10代) / Xeon Cascade Lake 及以上 | Zen 4 (Ryzen 7000) 及以上 |
+| `pikafish-avx512icl.exe` | AVX-512 ICX | Ice Lake (10代) / Xeon Ice Lake 及以上 | Zen 4 (Ryzen 7000) 及以上 |
+| `pikafish-avx512.exe` | AVX-512 F/CD/BW/VL | Skylake-X (HEDT) 及以上 | Zen 4 (Ryzen 7000) 及以上 |
+| `pikafish-avxvnni.exe` | AVX-VNNI | **Tiger Lake (11代) 及以上** ⭐ 12/13/14 代必选 | Zen 3 (Ryzen 5000) 及以上 |
+| `pikafish-bmi2.exe` | BMI2 | Haswell (4代) 及以上 | Zen 3 (Ryzen 5000) 及以上 |
+| `pikafish-avx2.exe` | AVX2 | Haswell (4代, 2013) 及以上 | Zen 1 (Ryzen 1000) 及以上 |
+| `pikafish-sse41-popcnt.exe` | SSE4.1 + POPCNT | Core 2 Duo (2008) 之后基本都有 | Bulldozer 及以上 |
 
-> **常见误区**：12 代 (Alder Lake) 及以上的 Intel **客户端** CPU **不支持 AVX-512 / VNNI512**（大小核架构砍掉了），请选 **avxvnni** 版本。例如 i5-13500HX、i7-12700H、i9-14900K 都属于这类。
+> **常见误区**：12 代 (Alder Lake) 及以上的 Intel **客户端** CPU **不支持 AVX-512 / VNNI512**（大小核架构砍掉了），必须选 **`pikafish-avxvnni.exe`**。例如 i5-13500HX、i7-12700H、i9-14900K 都属于这类。
 
 ### 如何查看自己的 CPU 支持哪种指令集
 
@@ -116,7 +141,7 @@ Name
 13th Gen Intel(R) Core(TM) i5-13500HX
 ```
 
-→ 13 代 Intel 客户端 CPU，查表 → 选 **`avxvnni`**。
+→ 13 代 Intel 客户端 CPU，查表 → 选 **`pikafish-avxvnni.exe`**。
 
 **方法二：CPU-Z / HWiNFO**
 
@@ -124,32 +149,36 @@ Name
 
 **方法三：照型号推算**
 
-| 你的 CPU | 推荐版本 |
+| 你的 CPU | 推荐文件 |
 |---|---|
-| Intel 12/13/14 代酷睿（型号含 `12xx`/`13xx`/`14xx`）| `avxvnni` |
-| Intel 11 代酷睿（型号含 `11xx`）| `avxvnni` |
-| Intel 10 代及以下酷睿 | `avx2` 或 `bmi2` |
-| Intel Xeon (服务器，2019+) | `vnni512` 或 `avx512` |
-| AMD Ryzen 7000+ / 9000+ | `vnni512` 或 `avx512` |
-| AMD Ryzen 5000 | `avxvnni` 或 `bmi2` |
-| AMD Ryzen 3000 及以下 | `avx2` |
-| 不确定 / 十年前的老电脑 | `sse41-popcnt` 兜底 |
+| Intel 12/13/14 代酷睿（型号含 `12xx`/`13xx`/`14xx`）| `pikafish-avxvnni.exe` |
+| Intel 11 代酷睿（型号含 `11xx`）| `pikafish-avxvnni.exe` |
+| Intel 10 代及以下酷睿 | `pikafish-avx2.exe` 或 `pikafish-bmi2.exe` |
+| Intel Xeon (服务器，2019+) | `pikafish-vnni512.exe` 或 `pikafish-avx512.exe` |
+| AMD Ryzen 7000+ / 9000+ | `pikafish-vnni512.exe` 或 `pikafish-avx512.exe` |
+| AMD Ryzen 5000 | `pikafish-avxvnni.exe` 或 `pikafish-bmi2.exe` |
+| AMD Ryzen 3000 及以下 | `pikafish-avx2.exe` |
+| 不确定 / 十年前的老电脑 | `pikafish-sse41-popcnt.exe` 兜底 |
 
-> **试错法**：下载错了也没关系，选错了引擎一启动就崩溃退出（无报错弹窗，只是 `engine_server.py` 显示「引擎启动失败」），换一个版本即可。
+> **试错法**：选错了也没关系，引擎一启动就崩溃退出（无报错弹窗，只是 `engine_server.py` 显示「引擎启动失败」），换一个 exe 即可。
 
-**第二步：解压到 `nnue/` 文件夹**
+**第三步：放入 `nnue/` 文件夹**
 
-zip 里有两个文件，解压到项目根目录的 `nnue/` 文件夹：
+从解压目录里拷贝**两个文件**到项目根目录的 `nnue/` 文件夹：
+- 你选中的那一个 `pikafish-*.exe`（约 1.5MB）
+- `pikafish.nnue`（NNUE 权重，约 53MB，所有 exe 共用）
 
 ```
 xiangqi-replay/
 ├── engine_server.py
 ├── nnue/                        ← 新建这个文件夹
-│   ├── pikafish.exe             ← 引擎程序（约 1.5MB）
+│   ├── pikafish-avxvnni.exe     ← 你选的那一个（约 1.5MB）
 │   └── pikafish.nnue            ← NNUE 权重（约 53MB）
 ```
 
-**第三步：重新运行**
+> **注意**：不要把多个 `pikafish-*.exe` 都放进来，只能放一个。`pikafish.nnue` 文件名不要改。
+
+**第四步：重新运行**
 
 ```bash
 python engine_server.py
@@ -157,7 +186,7 @@ python engine_server.py
 
 看到 `正在启动皮卡鱼引擎` 和 `引擎已就绪` 即安装成功。
 
-> **注意**：引擎功能仅在本地运行时可用，GitHub Pages 在线版无法连接本地引擎。
+> **说明**：引擎功能仅在本地运行时可用，GitHub Pages 在线版无法连接本地引擎。
 
 ---
 
