@@ -35,13 +35,39 @@
 
 ## 在线试用
 
-点击下方卡片直接打开（推荐 **Chrome** 或 **Edge**）：
+点击下方按钮直接打开（推荐 **Chrome** 或 **Edge**）：
 
 <div align="center">
 
 ### [xiangqi-replay](https://zhiqiangbao.github.io/xiangqi-replay/)
 
 </div>
+
+## 本地运行
+
+> 不能直接双击 `index.html` 打开！项目使用了 ES Modules（`<script type="module">`），`file://` 协议下浏览器会阻止模块加载。
+
+任选一种方式启动本地服务器：
+
+**方式一：npx（需要 Node.js）**
+```bash
+cd xiangqi-replay
+npx serve .
+```
+
+**方式二：Python 自带服务器**
+```bash
+cd xiangqi-replay
+python -m http.server 8000
+```
+
+**方式三：VS Code Live Server 插件**
+
+安装 Live Server 插件 → 右键 `index.html` → Open with Live Server
+
+启动后浏览器访问 `http://localhost:8000`（端口号取决于启动方式）即可。
+
+> 当然，最简单的方式是直接用上面的在线版链接。
 
 ---
 
