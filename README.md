@@ -43,6 +43,81 @@ python server.py
 
 ---
 
+## 引擎分析（皮卡鱼 NNUE）
+
+本项目支持接入 [皮卡鱼（Pikafish）](https://github.com/official-pikafish/Pikafish) 引擎进行局面评估。皮卡鱼是基于 NNUE 权重的中国象棋引擎，评估精度远超传统子力价值表。
+
+### 快速使用
+
+```bash
+python engine_server.py
+```
+
+浏览器自动打开后，按 `E` 键连接引擎，棋盘左上角会显示：
+
+- **评分**：红方视角的分值（如 `红+2.30` 表示红方优势约 2 个兵）
+- **最佳走法**：绿色箭头标注引擎推荐走法
+- **状态**：连接 / 分析中 / 已就绪
+
+### 引擎工作原理
+
+```
+浏览器 (fetch POST /api/evaluate {fen})
+        ↓
+engine_server.py (Python HTTP 服务)
+        ↓ UCI 协议 (stdin/stdout)
+pikafish.exe (C++ 引擎)
+        ↓ 加载
+pikafish.nnue (53MB NNUE 权重文件)
+```
+
+引擎通过 UCI 协议与 Python 服务通信：
+1. 发送 `position fen <当前局面>`
+2. 发送 `go depth 15`（搜索深度 15 层）
+3. 解析 `info score cp <分值>` 和 `bestmove <走法>`
+4. 返回 JSON 给前端显示
+
+### 安装皮卡鱼
+
+如果 `engine_server.py` 提示「未找到 pikafish.exe」，按以下步骤操作：
+
+**第一步：下载**
+
+打开 [Pikafish Releases](https://github.com/official-pikafish/Pikafish/releases/latest)，根据 CPU 选一个压缩包：
+
+| 文件名 | 适用 CPU |
+|---|---|
+| `pikafish-windows-x86-64-vnni512.zip` | Intel Ice Lake+ / AMD Zen 4+ |
+| `pikafish-windows-x86-64-avx512.zip` | Intel Skylake-X+ / AMD Zen 4+ |
+| `pikafish-windows-x86-64-avxvnni.zip` | Intel Tiger Lake+ / AMD Zen 3+ |
+| `pikafish-windows-x86-64-bmi2.zip` | Intel Haswell+ / AMD Zen 3+（不确定就选这个） |
+| `pikafish-windows-x86-64-avx2.zip` | 大多数 2013 年后的 CPU |
+| `pikafish-windows-x86-64-sse41-popcnt.zip` | 老电脑兜底 |
+
+**第二步：解压到 `nnue/` 文件夹**
+
+zip 里有两个文件，解压到项目根目录的 `nnue/` 文件夹：
+
+```
+xiangqi-replay/
+├── engine_server.py
+├── nnue/                        ← 新建这个文件夹
+│   ├── pikafish.exe             ← 引擎程序（约 1.5MB）
+│   └── pikafish.nnue            ← NNUE 权重（约 53MB）
+```
+
+**第三步：重新运行**
+
+```bash
+python engine_server.py
+```
+
+看到 `正在启动皮卡鱼引擎` 和 `引擎已就绪` 即安装成功。
+
+> **注意**：引擎功能仅在本地运行时可用，GitHub Pages 在线版无法连接本地引擎。
+
+---
+
 ## 功能特性
 
 ### 棋盘与规则
@@ -93,6 +168,7 @@ python server.py
 | `R` | 重新开局 |
 | `S` | 进入 / 退出布置模式 |
 | `L` | 打开 / 关闭棋谱库面板 |
+| `E` | 连接 / 断开皮卡鱼引擎 |
 
 </div>
 
@@ -121,9 +197,11 @@ xiangqi-replay/
 │   └── style.css               # 样式（古典木质棋盘 + 响应式布局）
 ├── js/
 │   ├── xiangqi-game.js          # 核心规则：棋盘 · 走法 · 合法性 · PGN/FEN · 棋谱树
-│   ├── xiangqi-board.js         # Canvas 绘图 · 交互 · 磁盘文件绑定逻辑
+│   ├── xiangqi-board.js         # Canvas 绘图 · 交互 · 磁盘文件绑定 · 引擎评估显示
 │   ├── storage.js               # localStorage 棋谱库 CRUD
 │   └── file-handle-store.js     # IndexedDB + File System Access API 封装
+├── server.py                    # 本地静态文件服务器
+├── engine_server.py             # 本地服务器 + 皮卡鱼引擎分析服务
 └── assets/
     └── pieces/                  # 棋子图片素材
 ```

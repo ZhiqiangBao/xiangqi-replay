@@ -39,3 +39,9 @@ Thumbs.db
 
 # OS
 Desktop.ini
+
+# 皮卡鱼引擎二进制文件（用户自行下载，不上传仓库）
+nnue/*
+!nnue/.gitkeep
+pikafish*.exe
+pikafish*.nnue

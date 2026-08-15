@@ -78,6 +78,12 @@ let currentLibraryFilename = null; // 对应库条目的文件名（可选记录
 // 「同一盘棋对应同一个磁盘 .pgn 文件，更新时覆盖同文件不再下载副本」的核心锚点。
 let currentBoundFile = null;       // { libraryId, handle, pathHint, updatedAt } | null
 
+// 引擎分析
+let engineEnabled = false;          // 是否启用引擎评估
+let engineStatus = 'offline';       // offline | connecting | ready | evaluating | error
+let engineScore = null;             // { score, scoreType, bestMove, pv } | null
+let engineTimer = null;             // 防抖计时器
+
 function cell2px(x, y) {
 	return { x: BOARD_OFFSET.x + x * CELL, y: BOARD_OFFSET.y + y * CELL };
 }
@@ -109,6 +115,88 @@ function pieceKey(piece) {
 
 function requestRender() {
 	requestAnimationFrame(render);
+}
+
+// UCI 走法坐标转棋盘坐标，如 "h2e2" → {from:{x:7,y:7}, to:{x:4,y:7}}
+// UCI rank 0 = 棋盘底部（红方），我们的 y=9 = 底部，需要翻转：our_y = 9 - uci_rank
+function uciMoveToCoords(uci) {
+	if (!uci || uci.length < 4) return null;
+	const fx = uci.charCodeAt(0) - 97;
+	const fy = 9 - parseInt(uci[1], 10);
+	const tx = uci.charCodeAt(2) - 97;
+	const ty = 9 - parseInt(uci[3], 10);
+	if (isNaN(fy) || isNaN(ty)) return null;
+	return { from: { x: fx, y: fy }, to: { x: tx, y: ty } };
+}
+
+// 引擎评估：发送当前 FEN 到本地引擎服务
+function engineEvaluate() {
+	if (!engineEnabled || engineStatus === 'offline' || engineStatus === 'connecting') return;
+	const fen = game.to_fen();
+	engineStatus = 'evaluating';
+	requestRender();
+	fetch('/api/evaluate', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ fen, depth: 15 }),
+	})
+		.then(r => r.json())
+		.then(data => {
+			if (data.error) {
+				engineStatus = 'error';
+				engineScore = null;
+			} else {
+				engineStatus = 'ready';
+				engineScore = data;
+			}
+			requestRender();
+		})
+		.catch(() => {
+			engineStatus = 'error';
+			engineScore = null;
+			requestRender();
+		});
+}
+
+function engineEvaluateDebounced() {
+	if (!engineEnabled) return;
+	if (engineTimer) clearTimeout(engineTimer);
+	engineTimer = setTimeout(engineEvaluate, 300);
+}
+
+// 按 E 键切换引擎连接
+function toggleEngine() {
+	if (engineEnabled) {
+		engineEnabled = false;
+		engineStatus = 'offline';
+		engineScore = null;
+		setHint('引擎已关闭');
+		requestRender();
+		return;
+	}
+	engineEnabled = true;
+	engineStatus = 'connecting';
+	setHint('正在连接皮卡鱼引擎...');
+	requestRender();
+	// 检查引擎服务是否在线
+	fetch('/api/status')
+		.then(r => r.json())
+		.then(data => {
+			if (data.connected) {
+				engineStatus = 'ready';
+				setHint('引擎已连接，按 E 关闭');
+				engineEvaluateDebounced();
+			} else {
+				engineStatus = 'error';
+				setHint('引擎未就绪，请确认 engine_server.py 正在运行');
+			}
+			requestRender();
+		})
+		.catch(() => {
+			engineStatus = 'error';
+			setHint('无法连接引擎服务，请运行 python engine_server.py');
+			requestRender();
+		});
 }
 
 function setError(msg) {
@@ -844,6 +932,110 @@ function drawLibPanel() {
 	ctx.restore();
 }
 
+// UCI 走法转中文着法，如 "h2e2" → "炮二平五"
+function uciToChineseMove(uci) {
+	const coords = uciMoveToCoords(uci);
+	if (!coords) return uci;
+	const piece = game.get_piece_at(coords.from.x, coords.from.y);
+	if (!piece) return uci;
+	const move = { from: coords.from, to: coords.to, piece };
+	return game._move_text(move);
+}
+
+function drawEngineInfo() {
+	if (!engineEnabled) return;
+	ctx.save();
+	// 引擎面板放在左侧黑色边框区域，不遮挡棋盘
+	const x = 4, y = 400, w = 68, h = 160;
+	ctx.fillStyle = 'rgba(20,16,10,0.92)';
+	ctx.strokeStyle = COLORS.panelBrd;
+	ctx.lineWidth = 1;
+	ctx.beginPath();
+	ctx.roundRect(x, y, w, h, 5);
+	ctx.fill();
+	ctx.stroke();
+	// 标题
+	ctx.textAlign = 'center';
+	ctx.textBaseline = 'top';
+	ctx.font = '12px "Microsoft YaHei UI", sans-serif';
+	ctx.fillStyle = COLORS.panelBrd;
+	ctx.fillText('引擎', x + w / 2, y + 5);
+	// 状态
+	const statusMap = {
+		offline: { text: '未连接', color: '#888' },
+		connecting: { text: '连接中', color: '#e8a030' },
+		ready: { text: '已就绪', color: '#50c850' },
+		evaluating: { text: '分析中', color: '#e8a030' },
+		error: { text: '失败', color: '#e65' },
+	};
+	const st = statusMap[engineStatus] || statusMap.offline;
+	ctx.fillStyle = st.color;
+	ctx.font = '11px "Microsoft YaHei UI", sans-serif';
+	ctx.fillText(st.text, x + w / 2, y + 20);
+	// 评分
+	if (engineScore && engineScore.score !== null && engineScore.score !== undefined) {
+		const turn = game.current_turn;
+		let scoreText = '';
+		if (engineScore.scoreType === 'mate') {
+			const mateN = engineScore.score;
+			if (mateN > 0) {
+				scoreText = turn === 'red' ? `红绝杀${mateN}` : `黑绝杀${mateN}`;
+			} else {
+				scoreText = turn === 'red' ? `红被杀${-mateN}` : `黑被杀${-mateN}`;
+			}
+			ctx.fillStyle = mateN > 0 ? '#50c850' : '#e65';
+		} else {
+			const cp = engineScore.score;
+			const redCp = (turn === 'red') ? cp : -cp;
+			const pawns = (redCp / 100).toFixed(2);
+			const sign = redCp >= 0 ? '+' : '';
+			scoreText = `红${sign}${pawns}`;
+			ctx.fillStyle = redCp >= 0 ? COLORS.redChar : COLORS.blackChar;
+		}
+		ctx.font = '14px "Microsoft YaHei UI", sans-serif';
+		ctx.fillText(scoreText, x + w / 2, y + 38);
+		// 最佳走法
+		if (engineScore.bestMove && engineScore.bestMove !== '(none)') {
+			const coords = uciMoveToCoords(engineScore.bestMove);
+			if (coords) {
+				// 中文着法
+				const cnMove = uciToChineseMove(engineScore.bestMove);
+				ctx.fillStyle = COLORS.text;
+				ctx.font = '11px "Microsoft YaHei UI", sans-serif';
+				ctx.fillText('建议', x + w / 2, y + 60);
+				ctx.fillStyle = '#80d080';
+				ctx.font = '13px "Microsoft YaHei UI", sans-serif';
+				ctx.fillText(cnMove, x + w / 2, y + 74);
+				// 在棋盘上画箭头
+				const from = cell2px(coords.from.x, coords.from.y);
+				const to = cell2px(coords.to.x, coords.to.y);
+				ctx.strokeStyle = 'rgba(80,200,80,0.65)';
+				ctx.lineWidth = 2.5;
+				ctx.beginPath();
+				ctx.moveTo(from.x, from.y);
+				ctx.lineTo(to.x, to.y);
+				ctx.stroke();
+				// 箭头头
+				const ang = Math.atan2(to.y - from.y, to.x - from.x);
+				const ah = 12;
+				ctx.beginPath();
+				ctx.moveTo(to.x, to.y);
+				ctx.lineTo(to.x - ah * Math.cos(ang - 0.4), to.y - ah * Math.sin(ang - 0.4));
+				ctx.lineTo(to.x - ah * Math.cos(ang + 0.4), to.y - ah * Math.sin(ang + 0.4));
+				ctx.closePath();
+				ctx.fillStyle = 'rgba(80,200,80,0.65)';
+				ctx.fill();
+				// 起点圆圈
+				ctx.beginPath();
+				ctx.arc(from.x, from.y, 5, 0, Math.PI * 2);
+				ctx.fillStyle = 'rgba(80,200,80,0.45)';
+				ctx.fill();
+			}
+		}
+	}
+	ctx.restore();
+}
+
 function drawBottomHint() {
 	ctx.save();
 	if (errorMsg && errorTime > 0) {
@@ -867,7 +1059,7 @@ function drawBottomHint() {
 	} else if (gameOverMsg) {
 		bottom = `对局结束！${gameOverMsg}  [Ctrl+S]导出保存  [R]重新开局  [P]棋谱  [L]库`;
 	} else {
-		bottom = 'R=重开 S=布置 ←→=复盘 Tab=分支 P=棋谱 L=库 Ctrl+S=导出';
+		bottom = 'R=重开 S=布置 ←→=复盘 Tab=分支 P=棋谱 L=库 E=引擎 Ctrl+S=导出';
 	}
 	ctx.fillStyle = COLORS.text;
 	ctx.textAlign = 'center';
@@ -894,6 +1086,7 @@ function render() {
 	drawSetupPalette();
 	drawPGNPanel();
 	drawLibPanel();
+	drawEngineInfo();
 	drawBottomHint();
 }
 
@@ -1342,7 +1535,7 @@ function onKeyDown(e) {
 			break;
 		case 'e':
 		case 'E':
-			exportPGN();
+			toggleEngine();
 			break;
 		case 'i':
 		case 'I':
@@ -1612,12 +1805,17 @@ document.addEventListener('DOMContentLoaded', () => {
 	setupUploadInput();
 	if (!gameEventsConnected) {
 		game.onPositionChanged.push(requestRender);
+		game.onPositionChanged.push(() => engineEvaluateDebounced());
 		gameEventsConnected = true;
 	}
 	canvas.addEventListener('mousemove', onMouseMove);
 	canvas.addEventListener('click', onMouseClick);
 	canvas.addEventListener('wheel', onMouseWheel, { passive: false });
 	window.addEventListener('keydown', onKeyDown);
+	// 浏览器关闭/刷新时通知引擎服务退出
+	window.addEventListener('beforeunload', () => {
+		navigator.sendBeacon('/api/shutdown');
+	});
 	// 暴露关键状态给浏览器调试/测试：刷新 __xq 快照
 	const snap = () => ({
 		currentLibraryId,
@@ -1638,6 +1836,7 @@ document.addEventListener('DOMContentLoaded', () => {
 		libCount: libList.length,
 		panelOpen, libOpen, gameOverMsg,
 		supportsFS: FileHandleStore.SUPPORTS_NATIVE_FILE_SYSTEM,
+		engineEnabled, engineStatus, engineScore,
 	});
 	window.__xq = {
 		get state() { return snap(); },
