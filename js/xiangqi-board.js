@@ -71,6 +71,8 @@ let errorTime = 0;
 let hintMsg = '';
 let hintTime = 0;
 let gameOverMsg = '';
+let currentLibraryId = null;       // 当前对局关联的棋谱库条目ID（有值时保存走更新，不新建）
+let currentLibraryFilename = null; // 对应库条目的文件名（可选记录，便于更新展示）
 
 function cell2px(x, y) {
 	return { x: BOARD_OFFSET.x + x * CELL, y: BOARD_OFFSET.y + y * CELL };
@@ -1110,6 +1112,8 @@ function handleLibClick(px, py) {
 		mode = 'play';
 		gameOverMsg = '';
 		lastMove = null;
+		currentLibraryId = null;
+		currentLibraryFilename = null;
 		libList = StorageManager.library.listGames();
 		requestRender();
 		return;
@@ -1125,6 +1129,21 @@ function handleLibClick(px, py) {
 		for (let idx = libScroll; idx < libScroll + visRows && idx < libList.length; idx++) {
 			const rb = drawLibPanel._rowButtons[idx];
 			if (!rb) continue;
+			if (pointInRect(px, py, rb.del)) {
+				try {
+					StorageManager.library.deleteGame(rb.entry.id);
+					if (currentLibraryId === rb.entry.id) {
+						currentLibraryId = null;
+						currentLibraryFilename = null;
+					}
+					libList = StorageManager.library.listGames();
+					setHint(`已删除 ${rb.entry.filename || rb.entry.id}`);
+				} catch (e) {
+					setError('删除失败: ' + (e.message || e));
+				}
+				requestRender();
+				return;
+			}
 			if (pointInRect(px, py, rb.load)) {
 				try {
 					const pgn = StorageManager.library.loadGame(rb.entry.id);
@@ -1138,6 +1157,8 @@ function handleLibClick(px, py) {
 							legalTargets = [];
 							gameOverMsg = '';
 							lastMove = !game.current_node.isRoot() ? { from: game.current_node.from, to: game.current_node.to } : null;
+							currentLibraryId = rb.entry.id;
+							currentLibraryFilename = rb.entry.filename || null;
 							setHint(`已加载 ${rb.entry.filename || rb.entry.id}`);
 							game._emit_position_changed();
 						} else {
@@ -1243,6 +1264,8 @@ function onKeyDown(e) {
 			gameOverMsg = '';
 			lastMove = null;
 			panelRowsCache = [];
+			currentLibraryId = null;
+			currentLibraryFilename = null;
 			setHint('已重新开局，红方先行');
 			requestRender();
 			break;
@@ -1261,6 +1284,8 @@ function onKeyDown(e) {
 				setupRedFirst = true;
 				gameOverMsg = '';
 				game.winner = null;
+				currentLibraryId = null;
+				currentLibraryFilename = null;
 				setHint('布置模式：palette选子，点格放置，点棋子移除');
 			}
 			requestRender();
@@ -1326,17 +1351,39 @@ function checkGameEnd() {
 	}
 }
 
+function _buildSaveFilename() {
+	let resultStr = '未分胜负';
+	if (game.winner === 'red') resultStr = '红胜';
+	else if (game.winner === 'black') resultStr = '黑胜';
+	return StorageManager.library.generateFilename({ result: resultStr });
+}
+
+function saveCurrentGameToLibrary() {
+	const pgn = game.export_pgn();
+	let filename;
+	if (currentLibraryId) {
+		const res = StorageManager.library.updateGame(currentLibraryId, pgn, undefined);
+		filename = res.filename;
+		if (res.id_renewed) currentLibraryId = res.id;
+		currentLibraryFilename = filename || currentLibraryFilename;
+	} else {
+		filename = _buildSaveFilename();
+		const res = StorageManager.library.saveGame(pgn, filename);
+		currentLibraryId = res.id;
+		currentLibraryFilename = res.filename || filename;
+	}
+	libList = StorageManager.library.listGames();
+	return { filename, id: currentLibraryId };
+}
+
 function exportPGN() {
 	try {
 		const pgn = game.export_pgn();
-		let resultStr = '未分胜负';
-		if (game.winner === 'red') resultStr = '红胜';
-		else if (game.winner === 'black') resultStr = '黑胜';
-		const filename = StorageManager.library.generateFilename({ result: resultStr });
+		const filename = currentLibraryFilename || _buildSaveFilename();
 		StorageManager.fileIO.exportAsDownload(pgn, filename);
-		StorageManager.library.saveGame(pgn, filename);
-		libList = StorageManager.library.listGames();
-		setHint(`已导出 ${filename}`);
+		const saved = saveCurrentGameToLibrary();
+		const tag = StorageManager.library.hasGame(saved.id) && StorageManager.library.listGames().some(g => g.id === saved.id) ? '更新' : '保存';
+		setHint(`已${tag}并导出 ${saved.filename}`);
 	} catch (err) {
 		setError('导出失败: ' + (err.message || err));
 	}
@@ -1344,13 +1391,7 @@ function exportPGN() {
 
 function autoSavePGN() {
 	try {
-		const pgn = game.export_pgn();
-		let resultStr = '未分胜负';
-		if (game.winner === 'red') resultStr = '红胜';
-		else if (game.winner === 'black') resultStr = '黑胜';
-		const filename = StorageManager.library.generateFilename({ result: resultStr });
-		StorageManager.library.saveGame(pgn, filename);
-		libList = StorageManager.library.listGames();
+		saveCurrentGameToLibrary();
 	} catch (e) {
 	}
 }
@@ -1371,6 +1412,8 @@ function setupUploadInput() {
 				panelOpen = false;
 				libOpen = false;
 				lastMove = !game.current_node.isRoot() ? { from: game.current_node.from, to: game.current_node.to } : null;
+				currentLibraryId = null;
+				currentLibraryFilename = null;
 				setHint(`已导入 ${file.name}`);
 				game._emit_position_changed();
 			} else {

@@ -111,12 +111,43 @@ const StorageManager = {
         localStorage.setItem(prefix + id + '::meta', JSON.stringify(meta));
       } finally {
       }
-      return { id, filename: fname };
+      return { id, filename: fname, created: true };
     },
 
     loadGame(id) {
       try {
         return localStorage.getItem(this.KEY_PREFIX + id);
+      } finally {
+      }
+    },
+
+    hasGame(id) {
+      try {
+        return localStorage.getItem(this.KEY_PREFIX + id + '::meta') !== null;
+      } catch (e) {
+        return false;
+      }
+    },
+
+    updateGame(id, pgn, filename) {
+      const prefix = this.KEY_PREFIX;
+      const metaKey = prefix + id + '::meta';
+      try {
+        const metaRaw = localStorage.getItem(metaKey);
+        const now = Date.now();
+        let fname = filename;
+        if (metaRaw) {
+          const meta = JSON.parse(metaRaw);
+          if (fname) meta.filename = fname;
+          else fname = meta.filename || this.generateFilename();
+          meta.modified = now;
+          localStorage.setItem(prefix + id, pgn);
+          localStorage.setItem(metaKey, JSON.stringify(meta));
+          return { id, filename: fname, created: false };
+        }
+        // id 不存在，回退新建一个
+        const fallback = this.saveGame(pgn, fname);
+        return { id: fallback.id, filename: fallback.filename, created: true, id_renewed: true };
       } finally {
       }
     },
