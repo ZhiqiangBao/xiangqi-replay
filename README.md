@@ -33,31 +33,13 @@
 
 ---
 
-## 在线试用
-
-点击下方按钮直接打开（推荐 **Chrome** 或 **Edge**）：
-
-<div align="center">
-
-### [xiangqi-replay](https://zhiqiangbao.github.io/xiangqi-replay/)
-
-</div>
-
 ## 本地运行
-
-> 不能直接双击 `index.html` 打开！项目使用了 ES Modules，浏览器安全策略不允许 `file://` 协议加载。
-
-**最简单的方式 —— Python 一键启动**
-
-项目根目录自带了 `server.py`，它会自动启动服务器并打开浏览器：
 
 ```bash
 python server.py
 ```
 
-浏览器会自动弹出，不需要手动输地址。按 `Ctrl+C` 停止。
-
-> 当然，最简单的方式是直接用上面的在线版链接。
+浏览器会自动打开，按 `Ctrl+C` 停止。
 
 ---
 
@@ -161,16 +143,6 @@ xiangqi-replay/
 </div>
 
 > 磁盘覆盖保存依赖 [File System Access API](https://developer.mozilla.org/en-US/docs/Web/API/File_System_Access_API)，目前仅 Chromium 内核浏览器支持。Firefox / Safari 下自动回退为传统 `a[download]` 下载，其余功能不受影响。
-
----
-
-<div align="center">
-
-### 在线体验
-
-[![Open App](https://img.shields.io/badge/打开应用-开始对局-red?style=for-the-badge&logo=googlechrome&logoColor=white)](https://zhiqiangbao.github.io/xiangqi-replay/)
-
-</div>
 
 ---
 
