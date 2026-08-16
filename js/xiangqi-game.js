@@ -515,15 +515,15 @@ class XiangqiGame {
 			const nx = g.x + step.x;
 			const ny = g.y + step.y;
 			if (!this.is_on_board(nx, ny)) continue;
+			const p = this.board[ny][nx];
+			if (!p || p.side !== enemy || p.type !== TYPE_HORSE) continue;
 			let leg;
 			if (Math.abs(step.x) === 2) {
-				leg = { x: g.x + step.x / 2, y: g.y };
+				leg = { x: nx - step.x / 2, y: ny };
 			} else {
-				leg = { x: g.x, y: g.y + step.y / 2 };
+				leg = { x: nx, y: ny - step.y / 2 };
 			}
-			if (this.board[leg.y][leg.x] !== null) continue;
-			const p = this.board[ny][nx];
-			if (p && p.side === enemy && p.type === TYPE_HORSE) {
+			if (this.board[leg.y][leg.x] === null) {
 				return true;
 			}
 		}

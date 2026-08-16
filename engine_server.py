@@ -132,7 +132,7 @@ class Engine:
                 continue
         return False
 
-    def evaluate(self, fen, depth=15):
+    def evaluate(self, fen, depth=22):
         if not self.ready:
             return {"error": "engine not ready"}
         with self.lock:
@@ -229,7 +229,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 body = self.rfile.read(length).decode("utf-8")
                 req = json.loads(body)
                 fen = req.get("fen", "")
-                depth = req.get("depth", 15)
+                depth = req.get("depth", 22)
                 if not fen:
                     self._send_json(400, {"error": "missing fen"})
                     return

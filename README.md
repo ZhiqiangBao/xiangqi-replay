@@ -73,7 +73,7 @@ pikafish.nnue (53MB NNUE 权重文件)
 
 引擎通过 UCI 协议与 Python 服务通信：
 1. 发送 `position fen <当前局面>`
-2. 发送 `go depth 15`（搜索深度 15 层）
+2. 发送 `go depth 22`（搜索深度 22 层）
 3. 解析 `info score cp <分值>` 和 `bestmove <走法>`
 4. 返回 JSON 给前端显示
 

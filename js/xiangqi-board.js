@@ -138,7 +138,7 @@ function engineEvaluate() {
 	fetch('/api/evaluate', {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ fen, depth: 15 }),
+		body: JSON.stringify({ fen, depth: 22 }),
 	})
 		.then(r => r.json())
 		.then(data => {
